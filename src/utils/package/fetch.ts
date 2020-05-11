@@ -1,16 +1,20 @@
 import * as url from 'url'
 import * as http from 'http'
+import * as https from 'https'
 import * as LRUCache from 'lru-cache'
 import * as gunzip from 'gunzip-maybe'
 import { bufferStream } from '../buffer'
+import * as fetch from 'node-fetch'
 import { info, error, debug } from '../log'
 
+const NPM_REGISTRY = 'http://registry.npmjs.org'
+const CNPM_REGISTRY = 'http://r.cnpmjs.org'
+const TNPM_REGISTRY = 'http://r.tnpm.oa.com'
 const npmRegistryURL =
-  process.env.NPM_REGISTRY_URL || 'http://registry.npmjs.org'
+  process.env.NPM_REGISTRY_URL || TNPM_REGISTRY
 
-const agent = new http.Agent({
-  keepAlive: true
-})
+const httpAgent = new http.Agent({ keepAlive: true })
+const httpsAgent = new https.Agent({ keepAlive: true })
 
 const CACHE_NOTFOUND_PLACEHOLDER = ''
 const oneMegabyte = 1024 * 1024
@@ -36,9 +40,13 @@ const cache = new LRUCache({
   maxAge: oneSecond
 })
 
-function get(options): Promise<http.IncomingMessage> {
-  return new Promise((accept, reject) => {
-    http.get(options, accept).on('error', reject)
+function get(url, options?) {
+  return fetch(url, {
+    headers: {
+      Accept: 'application/json'
+    },
+    ...options,
+    agent: _parsedURL => _parsedURL.protocol === 'http:' ? httpAgent : httpsAgent
   })
 }
 
@@ -52,30 +60,22 @@ export const encodePackageName = packageName => {
 
 export const fetchPackageInfo = async packageName => {
   const infoApi = npmRegistryURL + '/' + encodePackageName(packageName)
-  const { hostname, pathname } = url.parse(infoApi)
-  const options = {
-    agent: agent,
-    hostname: hostname,
-    path: pathname,
-    headers: {
-      Accept: 'application/json'
-    }
-  }
-  info('fetching pkgInfo for %s from %s', packageName, infoApi)
+  // const { hostname, pathname } = url.parse(infoApi)
+  info(`fetching pkgInfo for ${packageName} from ${infoApi}`)
   
-  const res = await get(options)
+  const res = await get(infoApi)
 
-  if (res.statusCode === 200) {
-    return bufferStream(res).then(buffer => buffer.toString()).then(JSON.parse)
+  if (res.status === 200) {
+    return res.json()
   }
 
-  if (res.statusCode === 404) {
+  if (res.status === 404) {
     return null
   }
 
-  const content = (await bufferStream(res)).toString()
+  const content = await res.text()
 
-  error('Error fetching info for %s (status: %s)', packageName, res.statusCode)
+  error(`Error fetching info for ${packageName} (status: ${res.status})`)
   error(content)
 
   return null
@@ -148,38 +148,30 @@ export async function getPackageJson (packageName, version) {
 /**
  * Returns a stream of the tarball'd contents of the given package.
  */
-export async function loadPackage (packageName, version) {
-  const tarballName = isScopedPackage(packageName)
-    ? packageName.split('/')[1]
-    : packageName
-  const tarballURL = `${npmRegistryURL}/${packageName}/-/${tarballName}-${version}.tgz`
-  const { hostname, pathname } = url.parse(tarballURL)
-  const options = {
-    agent: agent,
-    hostname: hostname,
-    path: pathname
+export async function loadPackage (packageName, version, tarballURL?) {
+  if (!tarballURL) {
+    const tarballName = isScopedPackage(packageName)
+      ? packageName.split('/')[1]
+      : packageName
+    tarballURL = `${npmRegistryURL}/${packageName}/-/${tarballName}-${version}.tgz`
   }
   
-  debug('Fetching package for %s from %s', packageName, tarballURL)
-  const res = await get(options)
-
-  if (res.statusCode === 200) {
-    const stream = res.pipe(gunzip())
+  info(`Fetching package for ${packageName} from ${tarballURL}`)
+  const res = await get(tarballURL)
+  if (res.status === 200) {
+    const stream = res.body.pipe(gunzip())
     // stream.pause()
     return stream
   }
 
-  if (res.statusCode === 404) {
+  if (res.status === 404) {
     return null
   }
 
-  const content = (await bufferStream(res) as any).toString('utf-8')
+  const content = await res.text()
 
   error(
-    'Error fetching tarball for %s@%s (status: %s)',
-    packageName,
-    version,
-    res.statusCode
+    `Error fetching tarball for ${packageName}@${version} (status: ${res.status})`
   )
   error(content)
 

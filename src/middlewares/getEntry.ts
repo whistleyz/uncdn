@@ -1,14 +1,17 @@
+import { resolve } from 'path'
 import * as Koa from 'koa'
 import { loadPackage } from '../utils/package/fetch'
 import { searchEntries, createPackageURL } from '../utils/package/search'
+import PackageParse from '../utils/package/parse'
 
 /**
  * Fetch and search the archive to try and find the requested file.
  * Redirect to the "index" file if a directory was requested.
  */
 async function getEntry(ctx: Koa.Context, next) {
+  const tarball = PackageParse.getTarballFromPackageJson(ctx.packageJson)
   const { packageName, packageVersion, filename, packageSpec } = ctx.basicPackgeInfo
-  const stream = await loadPackage(packageName, packageVersion)
+  const stream = await loadPackage(packageName, packageVersion, tarball)
   const { foundEntry: entry, matchingEntries: entries } = await searchEntries(
     stream,
     filename
@@ -47,8 +50,8 @@ async function getEntry(ctx: Koa.Context, next) {
     // our URLs work in a similar way to require("lib") in node where it
     // uses `lib/index.js` when `lib` is a directory.
     const indexEntry =
-      entries[`${filename}/index.js`] ||
-      entries[`${filename}/index.json`]
+      entries[resolve(filename, '/index.js')] ||
+      entries[resolve(filename, '/index.json')]
 
     if (indexEntry && indexEntry.type === 'file') {
       // Redirect to the index file so relative imports
@@ -61,7 +64,7 @@ async function getEntry(ctx: Koa.Context, next) {
         createPackageURL(
           packageName,
           packageVersion,
-          entry.path,
+          indexEntry.path,
           ctx.query
         )
       )

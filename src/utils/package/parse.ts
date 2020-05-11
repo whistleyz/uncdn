@@ -1,3 +1,5 @@
+import { get } from 'lodash'
+
 const REGEXP_PATHNAME = /^\/((?:@[^/@]+\/)?[^/@]+)(?:@([^/]+))?(\/.*)?$/
 
 const PackageParse = {
@@ -24,8 +26,10 @@ const PackageParse = {
       packageSpec: `${packageName}@${packageVersion}`, // @scope/name@version
       filename // /file.js
     }
+  },
+  getTarballFromPackageJson (packageJson) {
+    return get(packageJson, 'dist.tarball')
   }
-  
 }
 
 export default PackageParse

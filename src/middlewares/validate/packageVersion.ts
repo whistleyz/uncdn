@@ -52,7 +52,7 @@ export default async function validateVersion (ctx: Koa.Context, next) {
     packageName,
     packageVersion
   )
-  console.log('version', version)
+  console.log('version', ctx.version)
 
   if (!version) {
     ctx.status = 404
